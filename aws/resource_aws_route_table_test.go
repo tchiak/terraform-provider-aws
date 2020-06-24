@@ -7,10 +7,9 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
 
 func init() {
@@ -82,6 +81,7 @@ func testSweepRouteTables(region string) error {
 
 func TestAccAWSRouteTable_basic(t *testing.T) {
 	var v ec2.RouteTable
+	resourceName := "aws_route_table.test"
 
 	testCheck := func(*terraform.State) error {
 		if len(v.Routes) != 2 {
@@ -128,27 +128,29 @@ func TestAccAWSRouteTable_basic(t *testing.T) {
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "aws_route_table.foo",
+		IDRefreshName: resourceName,
 		Providers:     testAccProviders,
 		CheckDestroy:  testAccCheckRouteTableDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRouteTableConfig,
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckRouteTableExists(
-						"aws_route_table.foo", &v),
+					testAccCheckRouteTableExists(resourceName, &v),
 					testCheck,
-					testAccCheckResourceAttrAccountID("aws_route_table.foo", "owner_id"),
+					testAccCheckResourceAttrAccountID(resourceName, "owner_id"),
 				),
 			},
-
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
 			{
 				Config: testAccRouteTableConfigChange,
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckRouteTableExists(
-						"aws_route_table.foo", &v),
+					testAccCheckRouteTableExists(resourceName, &v),
 					testCheckChange,
-					testAccCheckResourceAttrAccountID("aws_route_table.foo", "owner_id"),
+					testAccCheckResourceAttrAccountID(resourceName, "owner_id"),
 				),
 			},
 		},
@@ -157,6 +159,7 @@ func TestAccAWSRouteTable_basic(t *testing.T) {
 
 func TestAccAWSRouteTable_instance(t *testing.T) {
 	var v ec2.RouteTable
+	resourceName := "aws_route_table.test"
 
 	testCheck := func(*terraform.State) error {
 		if len(v.Routes) != 2 {
@@ -180,17 +183,21 @@ func TestAccAWSRouteTable_instance(t *testing.T) {
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "aws_route_table.foo",
+		IDRefreshName: resourceName,
 		Providers:     testAccProviders,
 		CheckDestroy:  testAccCheckRouteTableDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRouteTableConfigInstance,
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckRouteTableExists(
-						"aws_route_table.foo", &v),
+					testAccCheckRouteTableExists(resourceName, &v),
 					testCheck,
 				),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -198,6 +205,7 @@ func TestAccAWSRouteTable_instance(t *testing.T) {
 
 func TestAccAWSRouteTable_ipv6(t *testing.T) {
 	var v ec2.RouteTable
+	resourceName := "aws_route_table.test"
 
 	testCheck := func(*terraform.State) error {
 		// Expect 3: 2 IPv6 (local + all outbound) + 1 IPv4
@@ -210,44 +218,55 @@ func TestAccAWSRouteTable_ipv6(t *testing.T) {
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "aws_route_table.foo",
+		IDRefreshName: resourceName,
 		Providers:     testAccProviders,
 		CheckDestroy:  testAccCheckRouteTableDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRouteTableConfigIpv6,
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckRouteTableExists("aws_route_table.foo", &v),
+					testAccCheckRouteTableExists(resourceName, &v),
 					testCheck,
 				),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
 }
 
 func TestAccAWSRouteTable_tags(t *testing.T) {
-	var route_table ec2.RouteTable
+	var routeTable ec2.RouteTable
+	resourceName := "aws_route_table.test"
 
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "aws_route_table.foo",
+		IDRefreshName: resourceName,
 		Providers:     testAccProviders,
 		CheckDestroy:  testAccCheckRouteTableDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRouteTableConfigTags,
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckRouteTableExists("aws_route_table.foo", &route_table),
-					testAccCheckTags(&route_table.Tags, "foo", "bar"),
+					testAccCheckRouteTableExists(resourceName, &routeTable),
+					resource.TestCheckResourceAttr(resourceName, "tags.%", "1"),
+					resource.TestCheckResourceAttr(resourceName, "tags.foo", "bar"),
 				),
 			},
-
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
 			{
 				Config: testAccRouteTableConfigTagsUpdate,
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckRouteTableExists("aws_route_table.foo", &route_table),
-					testAccCheckTags(&route_table.Tags, "foo", ""),
-					testAccCheckTags(&route_table.Tags, "bar", "baz"),
+					testAccCheckRouteTableExists(resourceName, &routeTable),
+					resource.TestCheckResourceAttr(resourceName, "tags.%", "1"),
+					resource.TestCheckResourceAttr(resourceName, "tags.bar", "baz"),
 				),
 			},
 		},
@@ -256,15 +275,66 @@ func TestAccAWSRouteTable_tags(t *testing.T) {
 
 // For GH-13545, Fixes panic on an empty route config block
 func TestAccAWSRouteTable_panicEmptyRoute(t *testing.T) {
+	resourceName := "aws_route_table.test"
+
 	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:      func() { testAccPreCheck(t) },
-		IDRefreshName: "aws_route_table.foo",
+		IDRefreshName: resourceName,
 		Providers:     testAccProviders,
 		CheckDestroy:  testAccCheckRouteTableDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccRouteTableConfigPanicEmptyRoute,
 				ExpectError: regexp.MustCompile("The request must contain the parameter destinationCidrBlock or destinationIpv6CidrBlock"),
+			},
+		},
+	})
+}
+
+func TestAccAWSRouteTable_Route_ConfigMode(t *testing.T) {
+	var routeTable1, routeTable2, routeTable3 ec2.RouteTable
+	resourceName := "aws_route_table.test"
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckRouteTableDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAWSRouteTableConfigRouteConfigModeBlocks(),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRouteTableExists(resourceName, &routeTable1),
+					resource.TestCheckResourceAttr(resourceName, "route.#", "2"),
+				),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config: testAccAWSRouteTableConfigRouteConfigModeNoBlocks(),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRouteTableExists(resourceName, &routeTable2),
+					resource.TestCheckResourceAttr(resourceName, "route.#", "2"),
+				),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config: testAccAWSRouteTableConfigRouteConfigModeZeroed(),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRouteTableExists(resourceName, &routeTable3),
+					resource.TestCheckResourceAttr(resourceName, "route.#", "0"),
+				),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -284,6 +354,11 @@ func TestAccAWSRouteTable_Route_TransitGatewayID(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckRouteTableExists(resourceName, &routeTable1),
 				),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -310,11 +385,7 @@ func testAccCheckRouteTableDestroy(s *terraform.State) error {
 		}
 
 		// Verify the error is what we want
-		ec2err, ok := err.(awserr.Error)
-		if !ok {
-			return err
-		}
-		if ec2err.Code() != "InvalidRouteTableID.NotFound" {
+		if !isAWSErr(err, "InvalidRouteTableID.NotFound", "") {
 			return err
 		}
 	}
@@ -354,6 +425,7 @@ func testAccCheckRouteTableExists(n string, v *ec2.RouteTable) resource.TestChec
 // Right now there is no VPC Peering resource
 func TestAccAWSRouteTable_vpcPeering(t *testing.T) {
 	var v ec2.RouteTable
+	resourceName := "aws_route_table.test"
 
 	testCheck := func(*terraform.State) error {
 		if len(v.Routes) != 2 {
@@ -382,10 +454,14 @@ func TestAccAWSRouteTable_vpcPeering(t *testing.T) {
 			{
 				Config: testAccRouteTableVpcPeeringConfig,
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckRouteTableExists(
-						"aws_route_table.foo", &v),
+					testAccCheckRouteTableExists(resourceName, &v),
 					testCheck,
 				),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -394,6 +470,7 @@ func TestAccAWSRouteTable_vpcPeering(t *testing.T) {
 func TestAccAWSRouteTable_vgwRoutePropagation(t *testing.T) {
 	var v ec2.RouteTable
 	var vgw ec2.VpnGateway
+	resourceName := "aws_route_table.test"
 
 	testCheck := func(*terraform.State) error {
 		if len(v.PropagatingVgws) != 1 {
@@ -423,252 +500,372 @@ func TestAccAWSRouteTable_vgwRoutePropagation(t *testing.T) {
 			{
 				Config: testAccRouteTableVgwRoutePropagationConfig,
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckRouteTableExists(
-						"aws_route_table.foo", &v),
-					testAccCheckVpnGatewayExists(
-						"aws_vpn_gateway.foo", &vgw),
+					testAccCheckRouteTableExists(resourceName, &v),
+					testAccCheckVpnGatewayExists("aws_vpn_gateway.test", &vgw),
 					testCheck,
 				),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
 }
 
 const testAccRouteTableConfig = `
-resource "aws_vpc" "foo" {
-	cidr_block = "10.1.0.0/16"
-	tags = {
-		Name = "terraform-testacc-route-table"
-	}
+resource "aws_vpc" "test" {
+  cidr_block = "10.1.0.0/16"
+
+  tags = {
+  	Name = "terraform-testacc-route-table"
+  }
 }
 
-resource "aws_internet_gateway" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
+resource "aws_internet_gateway" "test" {
+  vpc_id = "${aws_vpc.test.id}"
 
-	tags = {
-		Name = "terraform-testacc-route-table"
-	}
+  tags = {
+  	Name = "terraform-testacc-route-table"
+  }
 }
 
-resource "aws_route_table" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
+resource "aws_route_table" "test" {
+  vpc_id = "${aws_vpc.test.id}"
 
-	route {
-		cidr_block = "10.2.0.0/16"
-		gateway_id = "${aws_internet_gateway.foo.id}"
-	}
+  route {
+    cidr_block = "10.2.0.0/16"
+    gateway_id = "${aws_internet_gateway.test.id}"
+  }
 }
 `
 
 const testAccRouteTableConfigChange = `
-resource "aws_vpc" "foo" {
-	cidr_block = "10.1.0.0/16"
-	tags = {
-		Name = "terraform-testacc-route-table"
-	}
+resource "aws_vpc" "test" {
+  cidr_block = "10.1.0.0/16"
+
+  tags = {
+    Name = "terraform-testacc-route-table"
+  }
 }
 
-resource "aws_internet_gateway" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
+resource "aws_internet_gateway" "test" {
+  vpc_id = "${aws_vpc.test.id}"
 
-	tags = {
-		Name = "terraform-testacc-route-table"
-	}
+  tags = {
+    Name = "terraform-testacc-route-table"
+  }
 }
 
-resource "aws_route_table" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
+resource "aws_route_table" "test" {
+  vpc_id = "${aws_vpc.test.id}"
 
-	route {
-		cidr_block = "10.3.0.0/16"
-		gateway_id = "${aws_internet_gateway.foo.id}"
-	}
+  route {
+    cidr_block = "10.3.0.0/16"
+    gateway_id = "${aws_internet_gateway.test.id}"
+  }
 
-	route {
-		cidr_block = "10.4.0.0/16"
-		gateway_id = "${aws_internet_gateway.foo.id}"
-	}
+  route {
+    cidr_block = "10.4.0.0/16"
+    gateway_id = "${aws_internet_gateway.test.id}"
+  }
 }
 `
 
 const testAccRouteTableConfigIpv6 = `
-resource "aws_vpc" "foo" {
+resource "aws_vpc" "test" {
   cidr_block = "10.1.0.0/16"
   assign_generated_ipv6_cidr_block = true
+
   tags = {
     Name = "terraform-testacc-route-table-ipv6"
   }
 }
 
-resource "aws_egress_only_internet_gateway" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
+resource "aws_egress_only_internet_gateway" "test" {
+  vpc_id = "${aws_vpc.test.id}"
 }
 
-resource "aws_route_table" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
+resource "aws_route_table" "test" {
+  vpc_id = "${aws_vpc.test.id}"
 
-	route {
-		ipv6_cidr_block = "::/0"
-		egress_only_gateway_id = "${aws_egress_only_internet_gateway.foo.id}"
-	}
+  route {
+    ipv6_cidr_block = "::/0"
+    egress_only_gateway_id = "${aws_egress_only_internet_gateway.test.id}"
+  }
 }
 `
 
 const testAccRouteTableConfigInstance = `
-resource "aws_vpc" "foo" {
-	cidr_block = "10.1.0.0/16"
-	tags = {
-		Name = "terraform-testacc-route-table-instance"
-	}
+data "aws_ami" "amzn-ami-minimal-hvm" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name = "name"
+    values = ["amzn-ami-minimal-hvm-*"]
+  }
+
+  filter {
+    name = "root-device-type"
+    values = ["ebs"]
+  }
 }
 
-resource "aws_subnet" "foo" {
-	cidr_block = "10.1.1.0/24"
-	vpc_id = "${aws_vpc.foo.id}"
-	tags = {
-		Name = "tf-acc-route-table-instance"
-	}
+resource "aws_vpc" "test" {
+  cidr_block = "10.1.0.0/16"
+
+  tags = {
+  	Name = "terraform-testacc-route-table-instance"
+  }
 }
 
-resource "aws_instance" "foo" {
-	# us-west-2
-	ami = "ami-4fccb37f"
-	instance_type = "m1.small"
-	subnet_id = "${aws_subnet.foo.id}"
+resource "aws_subnet" "test" {
+  cidr_block = "10.1.1.0/24"
+  vpc_id = "${aws_vpc.test.id}"
+
+  tags = {
+  	Name = "tf-acc-route-table-instance"
+  }
 }
 
-resource "aws_route_table" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
+resource "aws_instance" "test" {
+  ami           = "${data.aws_ami.amzn-ami-minimal-hvm.id}"
+  instance_type = "t2.micro"
+  subnet_id     = "${aws_subnet.test.id}"
+}
 
-	route {
-		cidr_block = "10.2.0.0/16"
-		instance_id = "${aws_instance.foo.id}"
-	}
+resource "aws_route_table" "test" {
+  vpc_id = "${aws_vpc.test.id}"
+
+  route {
+    cidr_block = "10.2.0.0/16"
+    instance_id = "${aws_instance.test.id}"
+  }
 }
 `
 
 const testAccRouteTableConfigTags = `
-resource "aws_vpc" "foo" {
-	cidr_block = "10.1.0.0/16"
-	tags = {
-		Name = "terraform-testacc-route-table-tags"
-	}
+resource "aws_vpc" "test" {
+  cidr_block = "10.1.0.0/16"
+
+  tags = {
+    Name = "terraform-testacc-route-table-tags"
+  }
 }
 
-resource "aws_route_table" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
+resource "aws_route_table" "test" {
+  vpc_id = "${aws_vpc.test.id}"
 
-	tags = {
-		foo = "bar"
-	}
+  tags = {
+    foo = "bar"
+  }
 }
 `
 
 const testAccRouteTableConfigTagsUpdate = `
-resource "aws_vpc" "foo" {
-	cidr_block = "10.1.0.0/16"
-	tags = {
-		Name = "terraform-testacc-route-table-tags"
-	}
+resource "aws_vpc" "test" {
+  cidr_block = "10.1.0.0/16"
+
+  tags = {
+    Name = "terraform-testacc-route-table-tags"
+  }
 }
 
-resource "aws_route_table" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
+resource "aws_route_table" "test" {
+  vpc_id = "${aws_vpc.test.id}"
 
-	tags = {
-		bar = "baz"
-	}
+  tags = {
+    bar = "baz"
+  }
 }
 `
 
 // VPC Peering connections are prefixed with pcx
 const testAccRouteTableVpcPeeringConfig = `
-resource "aws_vpc" "foo" {
-	cidr_block = "10.1.0.0/16"
-	tags = {
-		Name = "terraform-testacc-route-table-vpc-peering-foo"
-	}
+resource "aws_vpc" "test" {
+  cidr_block = "10.1.0.0/16"
+  tags = {
+    Name = "terraform-testacc-route-table-vpc-peering-foo"
+  }
 }
 
-resource "aws_internet_gateway" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
+resource "aws_internet_gateway" "test" {
+  vpc_id = "${aws_vpc.test.id}"
 
-	tags = {
-		Name = "terraform-testacc-route-table-vpc-peering-foo"
-	}
+  tags = {
+    Name = "terraform-testacc-route-table-vpc-peering-foo"
+  }
 }
 
 resource "aws_vpc" "bar" {
-	cidr_block = "10.3.0.0/16"
-	tags = {
-		Name = "terraform-testacc-route-table-vpc-peering-bar"
-	}
+  cidr_block = "10.3.0.0/16"
+
+  tags = {
+    Name = "terraform-testacc-route-table-vpc-peering-bar"
+  }
 }
 
 resource "aws_internet_gateway" "bar" {
-	vpc_id = "${aws_vpc.bar.id}"
+  vpc_id = "${aws_vpc.bar.id}"
 
-	tags = {
-		Name = "terraform-testacc-route-table-vpc-peering-bar"
-	}
+  tags = {
+    Name = "terraform-testacc-route-table-vpc-peering-bar"
+  }
 }
 
-resource "aws_vpc_peering_connection" "foo" {
-		vpc_id = "${aws_vpc.foo.id}"
-		peer_vpc_id = "${aws_vpc.bar.id}"
-	tags = {
-			foo = "bar"
-		}
+resource "aws_vpc_peering_connection" "test" {
+  vpc_id = "${aws_vpc.test.id}"
+  peer_vpc_id = "${aws_vpc.bar.id}"
+
+  tags = {
+    foo = "bar"
+  }
 }
 
-resource "aws_route_table" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
+resource "aws_route_table" "test" {
+  vpc_id = "${aws_vpc.test.id}"
 
-	route {
-		cidr_block = "10.2.0.0/16"
-		vpc_peering_connection_id = "${aws_vpc_peering_connection.foo.id}"
-	}
+  route {
+    cidr_block = "10.2.0.0/16"
+    vpc_peering_connection_id = "${aws_vpc_peering_connection.test.id}"
+  }
 }
 `
 
 const testAccRouteTableVgwRoutePropagationConfig = `
-resource "aws_vpc" "foo" {
-	cidr_block = "10.1.0.0/16"
-	tags = {
-		Name = "terraform-testacc-route-table-vgw-route-propagation"
-	}
+resource "aws_vpc" "test" {
+  cidr_block = "10.1.0.0/16"
+
+  tags = {
+    Name = "terraform-testacc-route-table-vgw-route-propagation"
+  }
 }
 
-resource "aws_vpn_gateway" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
+resource "aws_vpn_gateway" "test" {
+  vpc_id = "${aws_vpc.test.id}"
 }
 
-resource "aws_route_table" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
-
-	propagating_vgws = ["${aws_vpn_gateway.foo.id}"]
+resource "aws_route_table" "test" {
+  vpc_id           = "${aws_vpc.test.id}"
+  propagating_vgws = ["${aws_vpn_gateway.test.id}"]
 }
 `
 
 // For GH-13545
 const testAccRouteTableConfigPanicEmptyRoute = `
-resource "aws_vpc" "foo" {
-	cidr_block = "10.2.0.0/16"
-	tags = {
-		Name = "terraform-testacc-route-table-panic-empty-route"
-	}
+resource "aws_vpc" "test" {
+  cidr_block = "10.2.0.0/16"
+
+  tags = {
+    Name = "terraform-testacc-route-table-panic-empty-route"
+  }
 }
 
-resource "aws_route_table" "foo" {
-	vpc_id = "${aws_vpc.foo.id}"
+resource "aws_route_table" "test" {
+  vpc_id = "${aws_vpc.test.id}"
 
-  route {
-  }
+  route {}
 }
 `
 
+func testAccAWSRouteTableConfigRouteConfigModeBlocks() string {
+	return fmt.Sprintf(`
+resource "aws_vpc" "test" {
+  cidr_block = "10.0.0.0/16"
+
+  tags = {
+    Name = "tf-acc-test-ec2-route-table-config-mode"
+  }
+}
+
+resource "aws_internet_gateway" "test" {
+  tags = {
+    Name = "tf-acc-test-ec2-route-table-config-mode"
+  }
+
+  vpc_id = "${aws_vpc.test.id}"
+}
+
+resource "aws_route_table" "test" {
+  vpc_id = "${aws_vpc.test.id}"
+
+  route {
+    cidr_block = "10.1.0.0/16"
+    gateway_id = "${aws_internet_gateway.test.id}"
+  }
+
+  route {
+    cidr_block = "10.2.0.0/16"
+    gateway_id = "${aws_internet_gateway.test.id}"
+  }
+}
+`)
+}
+
+func testAccAWSRouteTableConfigRouteConfigModeNoBlocks() string {
+	return fmt.Sprintf(`
+resource "aws_vpc" "test" {
+  cidr_block = "10.0.0.0/16"
+
+  tags = {
+    Name = "tf-acc-test-ec2-route-table-config-mode"
+  }
+}
+
+resource "aws_internet_gateway" "test" {
+  tags = {
+    Name = "tf-acc-test-ec2-route-table-config-mode"
+  }
+
+  vpc_id = "${aws_vpc.test.id}"
+}
+
+resource "aws_route_table" "test" {
+  vpc_id = "${aws_vpc.test.id}"
+}
+`)
+}
+
+func testAccAWSRouteTableConfigRouteConfigModeZeroed() string {
+	return fmt.Sprintf(`
+resource "aws_vpc" "test" {
+  cidr_block = "10.0.0.0/16"
+
+  tags = {
+    Name = "tf-acc-test-ec2-route-table-config-mode"
+  }
+}
+
+resource "aws_internet_gateway" "test" {
+  tags = {
+    Name = "tf-acc-test-ec2-route-table-config-mode"
+  }
+
+  vpc_id = "${aws_vpc.test.id}"
+}
+
+resource "aws_route_table" "test" {
+  route  = []
+  vpc_id = "${aws_vpc.test.id}"
+}
+`)
+}
+
 func testAccAWSRouteTableConfigRouteTransitGatewayID() string {
 	return fmt.Sprintf(`
+data "aws_availability_zones" "available" {
+  # IncorrectState: Transit Gateway is not available in availability zone us-west-2d
+  blacklisted_zone_ids = ["usw2-az4"]
+  state                = "available"
+
+  filter {
+    name   = "opt-in-status"
+    values = ["opt-in-not-required"]
+  }
+}
+
 resource "aws_vpc" "test" {
   cidr_block = "10.0.0.0/16"
 
@@ -678,8 +875,9 @@ resource "aws_vpc" "test" {
 }
 
 resource "aws_subnet" "test" {
-  cidr_block = "10.0.0.0/24"
-  vpc_id     = "${aws_vpc.test.id}"
+  availability_zone = "${data.aws_availability_zones.available.names[0]}"
+  cidr_block        = "10.0.0.0/24"
+  vpc_id            = "${aws_vpc.test.id}"
 
   tags = {
     Name = "tf-acc-test-ec2-route-table-transit-gateway-id"

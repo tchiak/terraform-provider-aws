@@ -10,54 +10,27 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws/arn"
 	"github.com/aws/aws-sdk-go/service/apigateway"
 	"github.com/aws/aws-sdk-go/service/cognitoidentity"
 	"github.com/aws/aws-sdk-go/service/configservice"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/waf"
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/hashicorp/terraform/helper/structure"
-	"github.com/hashicorp/terraform/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/structure"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
 )
 
-// validateAny returns a SchemaValidateFunc which tests if the provided value
-// passes any of the provided SchemaValidateFunc
-// Temporarily added into AWS provider, but will be submitted upstream into provider SDK
-func validateAny(validators ...schema.SchemaValidateFunc) schema.SchemaValidateFunc {
-	return func(i interface{}, k string) ([]string, []error) {
-		var allErrors []error
-		var allWarnings []string
-		for _, validator := range validators {
-			validatorWarnings, validatorErrors := validator(i, k)
-			if len(validatorWarnings) == 0 && len(validatorErrors) == 0 {
-				return []string{}, []error{}
-			}
-			allWarnings = append(allWarnings, validatorWarnings...)
-			allErrors = append(allErrors, validatorErrors...)
-		}
-		return allWarnings, allErrors
-	}
-}
+const (
+	awsAccountIDRegexpPattern = `^(aws|\d{12})$`
+	awsPartitionRegexpPattern = `^aws(-[a-z]+)*$`
+	awsRegionRegexpPattern    = `^[a-z]{2}(-[a-z]+)+-\d$`
+)
 
-// FloatAtLeast returns a SchemaValidateFunc which tests if the provided value
-// is of type float and is at least min (inclusive)
-func FloatAtLeast(min float64) schema.SchemaValidateFunc {
-	return func(i interface{}, k string) (s []string, es []error) {
-		v, ok := i.(float64)
-		if !ok {
-			es = append(es, fmt.Errorf("expected type of %s to be float", k))
-			return
-		}
-
-		if v < min {
-			es = append(es, fmt.Errorf("expected %s to be at least (%f), got %f", k, min, v))
-			return
-		}
-
-		return
-	}
-}
+var awsAccountIDRegexp = regexp.MustCompile(awsAccountIDRegexpPattern)
+var awsPartitionRegexp = regexp.MustCompile(awsPartitionRegexpPattern)
+var awsRegionRegexp = regexp.MustCompile(awsRegionRegexpPattern)
 
 // validateTypeStringNullableBoolean provides custom error messaging for TypeString booleans
 // Some arguments require three values: true, false, and "" (unspecified).
@@ -117,15 +90,10 @@ func validateTransferServerID(v interface{}, k string) (ws []string, errors []er
 
 func validateTransferUserName(v interface{}, k string) (ws []string, errors []error) {
 	value := v.(string)
-
 	// https://docs.aws.amazon.com/transfer/latest/userguide/API_CreateUser.html
-	pattern := `^[a-z0-9]{3,32}$`
-	if !regexp.MustCompile(pattern).MatchString(value) {
-		errors = append(errors, fmt.Errorf(
-			"%q isn't a valid transfer user name (only lowercase alphanumeric characters are allowed): %q",
-			k, value))
+	if !regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]{2,31}$`).MatchString(value) {
+		errors = append(errors, fmt.Errorf("Invalid %q: must be between 3 and 32 alphanumeric or special characters hyphen and underscore. However, %q cannot begin with a hyphen", k, k))
 	}
-
 	return
 }
 
@@ -219,31 +187,6 @@ func validateNeptuneEngine() schema.SchemaValidateFunc {
 	}, false)
 }
 
-func validateElastiCacheClusterId(v interface{}, k string) (ws []string, errors []error) {
-	value := v.(string)
-	if (len(value) < 1) || (len(value) > 20) {
-		errors = append(errors, fmt.Errorf(
-			"%q (%q) must contain from 1 to 20 alphanumeric characters or hyphens", k, value))
-	}
-	if !regexp.MustCompile(`^[0-9a-z-]+$`).MatchString(value) {
-		errors = append(errors, fmt.Errorf(
-			"only lowercase alphanumeric characters and hyphens allowed in %q (%q)", k, value))
-	}
-	if !regexp.MustCompile(`^[a-z]`).MatchString(value) {
-		errors = append(errors, fmt.Errorf(
-			"first character of %q (%q) must be a letter", k, value))
-	}
-	if regexp.MustCompile(`--`).MatchString(value) {
-		errors = append(errors, fmt.Errorf(
-			"%q (%q) cannot contain two consecutive hyphens", k, value))
-	}
-	if regexp.MustCompile(`-$`).MatchString(value) {
-		errors = append(errors, fmt.Errorf(
-			"%q (%q) cannot end with a hyphen", k, value))
-	}
-	return
-}
-
 func validateASGScheduleTimestamp(v interface{}, k string) (ws []string, errors []error) {
 	value := v.(string)
 	_, err := time.Parse(awsAutoscalingScheduleTimeLayout, value)
@@ -329,6 +272,10 @@ func validateDocDBIdentifier(v interface{}, k string) (ws []string, errors []err
 	if regexp.MustCompile(`-$`).MatchString(value) {
 		errors = append(errors, fmt.Errorf(
 			"%q cannot end with a hyphen", k))
+	}
+	if len(value) > 63 {
+		errors = append(errors, fmt.Errorf(
+			"%q cannot be greater than 63 characters", k))
 	}
 	return
 }
@@ -609,23 +556,6 @@ func validateCloudWatchLogResourcePolicyDocument(v interface{}, k string) (ws []
 	return
 }
 
-func validateIntegerInSlice(valid []int) schema.SchemaValidateFunc {
-	return func(i interface{}, k string) (s []string, es []error) {
-		v, ok := i.(int)
-		if !ok {
-			es = append(es, fmt.Errorf("expected type of %s to be int", k))
-			return
-		}
-		for _, in := range valid {
-			if v == in {
-				return
-			}
-		}
-		es = append(es, fmt.Errorf("expected %s to be one of %v, got %d", k, valid, v))
-		return
-	}
-}
-
 func validateCloudWatchEventTargetId(v interface{}, k string) (ws []string, errors []error) {
 	value := v.(string)
 	if len(value) > 64 {
@@ -731,12 +661,29 @@ func validateArn(v interface{}, k string) (ws []string, errors []error) {
 		return
 	}
 
-	// http://docs.aws.amazon.com/lambda/latest/dg/API_AddPermission.html
-	pattern := `^arn:[\w-]+:([a-zA-Z0-9\-])+:([a-z]{2}-(gov-)?[a-z]+-\d{1})?:(\d{12})?:(.*)$`
-	if !regexp.MustCompile(pattern).MatchString(value) {
-		errors = append(errors, fmt.Errorf(
-			"%q doesn't look like a valid ARN (%q): %q",
-			k, pattern, value))
+	parsedARN, err := arn.Parse(value)
+
+	if err != nil {
+		errors = append(errors, fmt.Errorf("%q (%s) is an invalid ARN: %s", k, value, err))
+		return
+	}
+
+	if parsedARN.Partition == "" {
+		errors = append(errors, fmt.Errorf("%q (%s) is an invalid ARN: missing partition value", k, value))
+	} else if !awsPartitionRegexp.MatchString(parsedARN.Partition) {
+		errors = append(errors, fmt.Errorf("%q (%s) is an invalid ARN: invalid partition value (expecting to match regular expression: %s)", k, value, awsPartitionRegexpPattern))
+	}
+
+	if parsedARN.Region != "" && !awsRegionRegexp.MatchString(parsedARN.Region) {
+		errors = append(errors, fmt.Errorf("%q (%s) is an invalid ARN: invalid region value (expecting to match regular expression: %s)", k, value, awsRegionRegexpPattern))
+	}
+
+	if parsedARN.AccountID != "" && !awsAccountIDRegexp.MatchString(parsedARN.AccountID) {
+		errors = append(errors, fmt.Errorf("%q (%s) is an invalid ARN: invalid account ID value (expecting to match regular expression: %s)", k, value, awsAccountIDRegexpPattern))
+	}
+
+	if parsedARN.Resource == "" {
+		errors = append(errors, fmt.Errorf("%q (%s) is an invalid ARN: missing resource value", k, value))
 	}
 
 	return
@@ -1746,16 +1693,6 @@ func validateCognitoUserPoolInviteTemplateSmsMessage(v interface{}, k string) (w
 	return
 }
 
-func validateCognitoUserPoolReplyEmailAddress(v interface{}, k string) (ws []string, errors []error) {
-	value := v.(string)
-
-	if !regexp.MustCompile(`[\p{L}\p{M}\p{S}\p{N}\p{P}]+@[\p{L}\p{M}\p{S}\p{N}\p{P}]+`).MatchString(value) {
-		errors = append(errors, fmt.Errorf(
-			`%q must satisfy regular expression pattern: [\p{L}\p{M}\p{S}\p{N}\p{P}]+@[\p{L}\p{M}\p{S}\p{N}\p{P}]+`, k))
-	}
-	return
-}
-
 func validateCognitoUserPoolSchemaName(v interface{}, k string) (ws []string, es []error) {
 	value := v.(string)
 	if len(value) < 1 {
@@ -1874,6 +1811,14 @@ func validateBatchName(v interface{}, k string) (ws []string, errors []error) {
 	return
 }
 
+func validateBatchPrefix(v interface{}, k string) (ws []string, errors []error) {
+	value := v.(string)
+	if !regexp.MustCompile(`^[0-9a-zA-Z]{1}[0-9a-zA-Z_\-]{0,101}$`).MatchString(value) {
+		errors = append(errors, fmt.Errorf("%q (%q) must be up to 102 letters (uppercase and lowercase), numbers, underscores and dashes, and must start with an alphanumeric.", k, v))
+	}
+	return
+}
+
 func validateSecurityGroupRuleDescription(v interface{}, k string) (ws []string, errors []error) {
 	value := v.(string)
 	if len(value) > 255 {
@@ -1883,7 +1828,7 @@ func validateSecurityGroupRuleDescription(v interface{}, k string) (ws []string,
 
 	// https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_IpRange.html. Note that
 	// "" is an allowable description value.
-	pattern := `^[A-Za-z0-9 \.\_\-\:\/\(\)\#\,\@\[\]\+\=\;\{\}\!\$\*]*$`
+	pattern := `^[A-Za-z0-9 \.\_\-\:\/\(\)\#\,\@\[\]\+\=\&\;\{\}\!\$\*]*$`
 	if !regexp.MustCompile(pattern).MatchString(value) {
 		errors = append(errors, fmt.Errorf(
 			"%q doesn't comply with restrictions (%q): %q",
@@ -2013,6 +1958,8 @@ func validateCognitoRoles(v map[string]interface{}) (errors []error) {
 func validateDxConnectionBandWidth() schema.SchemaValidateFunc {
 	return validation.StringInSlice([]string{
 		"1Gbps",
+		"2Gbps",
+		"5Gbps",
 		"10Gbps",
 		"50Mbps",
 		"100Mbps",
